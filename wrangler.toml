@@ -1,4 +1,4 @@
-name = "gartic-clone"
+name = "message-server"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 
@@ -8,4 +8,4 @@ class_name = "Room"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["Room"]
+new_sqlite_classes = ["Room"]
