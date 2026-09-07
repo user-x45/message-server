@@ -1,4 +1,4 @@
-name = "oekaki-dengen"
+name = "message-server"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
@@ -9,4 +9,4 @@ class_name = "GameSession"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["GameSession"]
+new_sqlite_classes = ["GameSession"]
