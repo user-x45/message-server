@@ -1,11 +1,12 @@
-name = "message-server"
+name = "oekaki-dengen"
 main = "src/index.js"
-compatibility_date = "2024-11-01"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 [[durable_objects.bindings]]
-name = "ROOMS"
-class_name = "Room"
+name = "GAME_SESSIONS"
+class_name = "GameSession"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["Room"]
+new_classes = ["GameSession"]
