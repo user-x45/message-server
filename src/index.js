@@ -112,6 +112,22 @@ export default {
       return json(data);
     }
 
+    const leaveMatch = path.match(/^\/api\/game\/([A-Z0-9]{6})\/leave$/);
+    if (leaveMatch && request.method === 'POST') {
+      const code = leaveMatch[1];
+      let body = {};
+      try { body = await request.json(); } catch (e) {}
+      const id = env.GAME_SESSIONS.idFromName(code);
+      const stub = env.GAME_SESSIONS.get(id);
+      const resp = await stub.fetch('https://internal/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      return json(data, resp.status);
+    }
+
     const resultMatch = path.match(/^\/api\/game\/([A-Z0-9]{6})\/result$/);
     if (resultMatch && request.method === 'GET') {
       const code = resultMatch[1];
