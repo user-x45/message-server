@@ -1,6 +1,7 @@
 export const VIEW_MS = 10000;
 export const DRAW_MS = 30000;
 const GRACE_MS = 5000;
+export const HEARTBEAT_TIMEOUT_MS = 15000;
 
 export class GameSession {
   constructor(state, env) {
@@ -39,12 +40,48 @@ export class GameSession {
         finishedAt: null,
         currentTurn: 0,
         turnStartedAt: null,
+        abortedBy: null,
       };
+      game.players[0].lastSeen = Date.now();
       await this.state.storage.put('game', game);
       return json({ ok: true, code, hostId, game: this._publicGame(game, hostId) });
     }
 
     if (!game) return json({ error: 'Game not found' }, 404);
+
+    if (game.status === 'drawing' || game.status === 'guessing') {
+      const now = Date.now();
+      const gone = game.players.find(p => p.lastSeen && now - p.lastSeen > HEARTBEAT_TIMEOUT_MS);
+      if (gone) {
+        game.status = 'aborted';
+        game.abortedBy = gone.name;
+        game.finishedAt = now;
+        await this.state.storage.put('game', game);
+      }
+    }
+
+    if (path === '/leave') {
+      const body = await request.json();
+      const { playerId } = body;
+      const leaver = game.players.find(p => p.id === playerId);
+      if (!leaver) return json({ error: 'Player not found' }, 404);
+
+      if (game.status === 'waiting') {
+        if (leaver.isHost) {
+          game.status = 'aborted';
+          game.abortedBy = leaver.name;
+          game.finishedAt = Date.now();
+        } else {
+          game.players = game.players.filter(p => p.id !== playerId);
+        }
+      } else if (game.status === 'drawing' || game.status === 'guessing') {
+        game.status = 'aborted';
+        game.abortedBy = leaver.name;
+        game.finishedAt = Date.now();
+      }
+      await this.state.storage.put('game', game);
+      return json({ ok: true });
+    }
 
     if (path === '/info') {
       return json({
@@ -67,7 +104,7 @@ export class GameSession {
       }
 
       const playerId = crypto.randomUUID();
-      game.players.push({ id: playerId, name: playerName, isHost: false, joinedAt: Date.now() });
+      game.players.push({ id: playerId, name: playerName, isHost: false, joinedAt: Date.now(), lastSeen: Date.now() });
       await this.state.storage.put('game', game);
       return json({ ok: true, playerId, game: this._publicGame(game, playerId) });
     }
@@ -78,7 +115,9 @@ export class GameSession {
       const player = game.players.find(p => p.id === playerId);
       if (!player || !player.isHost) return json({ error: 'Only host can start' }, 403);
       if (game.status !== 'waiting') return json({ error: 'Already started' }, 400);
-      if (game.players.length < 2) return json({ error: 'Need at least 2 players' }, 400);
+      if (game.players.length < game.maxPlayers) {
+        return json({ error: `Waiting for players (${game.players.length}/${game.maxPlayers})` }, 400);
+      }
       if (!topic) return json({ error: 'topic required' }, 400);
 
       game.topic = topic;
@@ -86,6 +125,7 @@ export class GameSession {
       game.startedAt = Date.now();
       game.turnStartedAt = Date.now();
       game.currentTurn = 0;
+      game.players.forEach(p => { p.lastSeen = Date.now(); });
       await this.state.storage.put('game', game);
       return json({ ok: true, game: this._publicGame(game, playerId) });
     }
@@ -95,7 +135,7 @@ export class GameSession {
       const { playerId, imageData, guess } = body;
       const player = game.players.find(p => p.id === playerId);
       if (!player) return json({ error: 'Player not found' }, 404);
-      if (game.status === 'waiting' || game.status === 'finished') {
+      if (game.status === 'waiting' || game.status === 'finished' || game.status === 'aborted') {
         return json({ error: 'Not in a submittable state' }, 400);
       }
 
@@ -144,6 +184,11 @@ export class GameSession {
 
     if (path === '/state') {
       const playerId = url.searchParams.get('playerId');
+      const me = game.players.find(p => p.id === playerId);
+      if (me) {
+        me.lastSeen = Date.now();
+        await this.state.storage.put('game', game);
+      }
       return json(this._publicGame(game, playerId));
     }
 
@@ -159,7 +204,6 @@ export class GameSession {
           turnIndex: d.turnIndex,
         })),
         guess: game.guess,
-        correct: game.guess?.text?.trim().toLowerCase() === game.topic?.trim().toLowerCase(),
       });
     }
 
@@ -168,7 +212,7 @@ export class GameSession {
 
   _publicGame(game, playerId) {
     const playerIndex = game.players.findIndex(p => p.id === playerId);
-    const isMyTurn = playerIndex === game.currentTurn && game.status !== 'waiting' && game.status !== 'finished';
+    const isMyTurn = playerIndex === game.currentTurn && (game.status === 'drawing' || game.status === 'guessing');
     const isLastPlayer = playerIndex === game.players.length - 1;
 
     let prevDrawing = null;
@@ -183,6 +227,8 @@ export class GameSession {
       code: game.code,
       status: game.status,
       players: game.players.map(p => ({ name: p.name, isHost: p.isHost })),
+      maxPlayers: game.maxPlayers,
+      abortedBy: game.abortedBy,
       currentTurn: game.currentTurn,
       myTurn: isMyTurn,
       myIndex: playerIndex,
