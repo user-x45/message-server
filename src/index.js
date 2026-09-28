@@ -1,6 +1,3 @@
-// Cloudflare Worker - お絵描き伝言ゲーム バックエンド
-// Durable Objects を使ったゲームセッション管理
-
 export { GameSession } from './gameSession.js';
 
 const CORS_HEADERS = {
@@ -32,7 +29,6 @@ export default {
       return new Response(null, { headers: CORS_HEADERS });
     }
 
-    // POST /api/create — 新しいゲームを作る
     if (path === '/api/create' && request.method === 'POST') {
       const body = await request.json();
       const { hostName, maxPlayers } = body;
@@ -51,7 +47,6 @@ export default {
       return json(data);
     }
 
-    // GET /api/join/:code — 参加情報を取得
     const joinMatch = path.match(/^\/api\/join\/([A-Z0-9]{6})$/);
     if (joinMatch && request.method === 'GET') {
       const code = joinMatch[1];
@@ -62,7 +57,6 @@ export default {
       return json(data);
     }
 
-    // POST /api/join/:code — 参加者を追加
     if (joinMatch && request.method === 'POST') {
       const code = joinMatch[1];
       const body = await request.json();
@@ -77,7 +71,6 @@ export default {
       return json(data, resp.status);
     }
 
-    // POST /api/game/:code/start — ゲーム開始
     const startMatch = path.match(/^\/api\/game\/([A-Z0-9]{6})\/start$/);
     if (startMatch && request.method === 'POST') {
       const code = startMatch[1];
@@ -93,7 +86,6 @@ export default {
       return json(data, resp.status);
     }
 
-    // POST /api/game/:code/submit — 絵または答えを提出
     const submitMatch = path.match(/^\/api\/game\/([A-Z0-9]{6})\/submit$/);
     if (submitMatch && request.method === 'POST') {
       const code = submitMatch[1];
@@ -109,7 +101,6 @@ export default {
       return json(data, resp.status);
     }
 
-    // GET /api/game/:code/state — ゲーム状態取得（ポーリング用）
     const stateMatch = path.match(/^\/api\/game\/([A-Z0-9]{6})\/state$/);
     if (stateMatch && request.method === 'GET') {
       const code = stateMatch[1];
@@ -121,7 +112,6 @@ export default {
       return json(data);
     }
 
-    // GET /api/game/:code/result — 結果を取得
     const resultMatch = path.match(/^\/api\/game\/([A-Z0-9]{6})\/result$/);
     if (resultMatch && request.method === 'GET') {
       const code = resultMatch[1];
