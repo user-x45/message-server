@@ -31,8 +31,12 @@ export default {
 
     if (path === '/api/create' && request.method === 'POST') {
       const body = await request.json();
-      const { hostName, maxPlayers } = body;
+      const { hostName } = body;
+      const maxPlayers = Number(body.maxPlayers);
       if (!hostName) return json({ error: 'hostName required' }, 400);
+      if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 16) {
+        return json({ error: 'maxPlayers must be an integer between 2 and 16' }, 400);
+      }
 
       const code = generateCode();
       const id = env.GAME_SESSIONS.idFromName(code);
@@ -41,7 +45,7 @@ export default {
       const resp = await stub.fetch('https://internal/init', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, hostName, maxPlayers: maxPlayers || 8 }),
+        body: JSON.stringify({ code, hostName, maxPlayers }),
       });
       const data = await resp.json();
       return json(data);
