@@ -25,6 +25,9 @@ export class GameSession {
       const body = await request.json();
       const { code, hostName, maxPlayers } = body;
       if (game) return json({ error: 'Already initialized' }, 400);
+      if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 16) {
+        return json({ error: 'maxPlayers must be an integer between 2 and 16' }, 400);
+      }
 
       const hostId = crypto.randomUUID();
       game = {
