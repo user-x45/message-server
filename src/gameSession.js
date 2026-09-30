@@ -1,5 +1,5 @@
-export const VIEW_MS = 10000;
-export const DRAW_MS = 30000;
+export const VIEW_MS = 30000;
+export const DRAW_MS = 60000;
 const GRACE_MS = 5000;
 export const HEARTBEAT_TIMEOUT_MS = 15000;
 
@@ -20,6 +20,7 @@ export class GameSession {
       });
 
     let game = (await this.state.storage.get('game')) || null;
+    if (game && game.round === undefined) game.round = 0;
 
     if (path === '/init') {
       const body = await request.json();
@@ -34,7 +35,8 @@ export class GameSession {
         code,
         status: 'waiting',
         maxPlayers,
-        players: [{ id: hostId, name: hostName, isHost: true, joinedAt: Date.now() }],
+        players: [{ id: hostId, name: hostName, isHost: true, present: true, joinedAt: Date.now() }],
+        round: 0,
         topic: null,
         drawings: [],
         guess: null,
@@ -69,13 +71,20 @@ export class GameSession {
       const leaver = game.players.find(p => p.id === playerId);
       if (!leaver) return json({ error: 'Player not found' }, 404);
 
-      if (game.status === 'waiting') {
-        if (leaver.isHost) {
+      if (game.status === 'waiting' || game.status === 'finished') {
+        if (game.status === 'waiting' && game.round === 0 && leaver.isHost) {
           game.status = 'aborted';
           game.abortedBy = leaver.name;
           game.finishedAt = Date.now();
         } else {
           game.players = game.players.filter(p => p.id !== playerId);
+          if (game.players.length === 0) {
+            game.status = 'aborted';
+            game.abortedBy = leaver.name;
+            game.finishedAt = Date.now();
+          } else if (leaver.isHost) {
+            this._promoteHost(game);
+          }
         }
       } else if (game.status === 'drawing' || game.status === 'guessing') {
         game.status = 'aborted';
@@ -107,7 +116,7 @@ export class GameSession {
       }
 
       const playerId = crypto.randomUUID();
-      game.players.push({ id: playerId, name: playerName, isHost: false, joinedAt: Date.now(), lastSeen: Date.now() });
+      game.players.push({ id: playerId, name: playerName, isHost: false, present: true, joinedAt: Date.now(), lastSeen: Date.now() });
       await this.state.storage.put('game', game);
       return json({ ok: true, playerId, game: this._publicGame(game, playerId) });
     }
@@ -118,11 +127,19 @@ export class GameSession {
       const player = game.players.find(p => p.id === playerId);
       if (!player || !player.isHost) return json({ error: 'Only host can start' }, 403);
       if (game.status !== 'waiting') return json({ error: 'Already started' }, 400);
-      if (game.players.length < game.maxPlayers) {
-        return json({ error: `Waiting for players (${game.players.length}/${game.maxPlayers})` }, 400);
+      const need = game.round > 0 ? 2 : game.maxPlayers;
+      if (game.players.length < need) {
+        return json({ error: `Waiting for players (${game.players.length}/${need})` }, 400);
+      }
+      if (game.players.some(p => p.present === false)) {
+        return json({ error: 'Waiting for players to return' }, 400);
       }
       if (!topic) return json({ error: 'topic required' }, 400);
 
+      game.drawings = [];
+      game.guess = null;
+      game.finishedAt = null;
+      game.abortedBy = null;
       game.topic = topic;
       game.status = 'drawing';
       game.startedAt = Date.now();
@@ -195,8 +212,45 @@ export class GameSession {
       return json(this._publicGame(game, playerId));
     }
 
+    if (path === '/rematch') {
+      const body = await request.json();
+      const { playerId } = body;
+      const player = game.players.find(p => p.id === playerId);
+      if (!player) return json({ error: 'Player not found' }, 404);
+
+      if (game.status === 'finished') {
+        game.status = 'waiting';
+        game.round += 1;
+        game.currentTurn = 0;
+        game.turnStartedAt = null;
+        game.players.forEach(p => { p.present = false; });
+      } else if (game.status === 'aborted') {
+        game.players = game.players.filter(p => p.id === playerId || p.name !== game.abortedBy);
+        game.status = 'waiting';
+        game.round += 1;
+        game.topic = null;
+        game.drawings = [];
+        game.guess = null;
+        game.startedAt = null;
+        game.finishedAt = null;
+        game.abortedBy = null;
+        game.currentTurn = 0;
+        game.turnStartedAt = null;
+        game.players.forEach(p => { p.present = false; });
+        if (!game.players.some(p => p.isHost)) this._promoteHost(game);
+      } else if (game.status !== 'waiting' || game.round === 0) {
+        return json({ error: 'Cannot continue in this room' }, 400);
+      }
+
+      player.present = true;
+      player.lastSeen = Date.now();
+      await this.state.storage.put('game', game);
+      return json({ ok: true, game: this._publicGame(game, playerId) });
+    }
+
     if (path === '/result') {
-      if (game.status !== 'finished') return json({ error: 'Game not finished' }, 400);
+      const hasResult = game.status === 'finished' || (game.status === 'waiting' && game.round > 0 && game.guess);
+      if (!hasResult) return json({ error: 'Game not finished' }, 400);
       return json({
         code: game.code,
         topic: game.topic,
@@ -211,6 +265,12 @@ export class GameSession {
     }
 
     return json({ error: 'Not found' }, 404);
+  }
+
+  _promoteHost(game) {
+    const next = game.players.find(p => p.present !== false) || game.players[0];
+    game.players.forEach(p => { p.isHost = p === next; });
+    game.players = [next, ...game.players.filter(p => p !== next)];
   }
 
   _publicGame(game, playerId) {
@@ -229,8 +289,11 @@ export class GameSession {
     return {
       code: game.code,
       status: game.status,
-      players: game.players.map(p => ({ name: p.name, isHost: p.isHost })),
+      players: game.players.map(p => ({ name: p.name, isHost: p.isHost, present: p.present !== false })),
       maxPlayers: game.maxPlayers,
+      round: game.round,
+      amHost: playerIndex >= 0 && !!game.players[playerIndex].isHost,
+      hasResult: game.status === 'finished' || (game.status === 'waiting' && !!game.guess),
       abortedBy: game.abortedBy,
       currentTurn: game.currentTurn,
       myTurn: isMyTurn,
