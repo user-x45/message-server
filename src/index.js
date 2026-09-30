@@ -132,6 +132,21 @@ export default {
       return json(data, resp.status);
     }
 
+    const rematchMatch = path.match(/^\/api\/game\/([A-Z0-9]{6})\/rematch$/);
+    if (rematchMatch && request.method === 'POST') {
+      const code = rematchMatch[1];
+      const body = await request.json();
+      const id = env.GAME_SESSIONS.idFromName(code);
+      const stub = env.GAME_SESSIONS.get(id);
+      const resp = await stub.fetch('https://internal/rematch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      return json(data, resp.status);
+    }
+
     const resultMatch = path.match(/^\/api\/game\/([A-Z0-9]{6})\/result$/);
     if (resultMatch && request.method === 'GET') {
       const code = resultMatch[1];
